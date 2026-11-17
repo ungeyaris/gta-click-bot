@@ -117,7 +117,7 @@ HELP = (
 def handle_commands(tg, state):
     """Leser nye Telegram-meldinger og returnerer en liste med /klipp-jobber."""
     jobs = []
-    params = {"timeout": 0, "allowed_updates": json.dumps(["message", "my_chat_member"])}
+    params = {"allowed_updates": json.dumps(["message", "my_chat_member"])}
     if state.get("tg_offset"):
         params["offset"] = state["tg_offset"]
     data = tg.call("getUpdates", **params)
