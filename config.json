@@ -4,6 +4,7 @@
   "max_sends_per_run": 4,
   "send_raw_clip": true,
   "whisper_model": "small",
+  "zoom": 1.4,
 
   "channels": {
     "kai": {
