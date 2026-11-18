@@ -76,9 +76,16 @@ class Telegram:
                          disable_web_page_preview="true")
 
     def video(self, chat, path, caption):
+        extra = {}
+        try:  # Telegram trenger størrelsen, ellers vises 9:16 skvist
+            w, h = probe_size(path)
+            extra = {"width": w, "height": h, "duration": int(probe_duration(path))}
+        except Exception as e:
+            log("Fant ikke videostørrelse:", e)
         with open(path, "rb") as f:
             return self.call("sendVideo", files={"video": f}, chat_id=chat, caption=caption,
-                             parse_mode="HTML", supports_streaming="true", timeout=300)
+                             parse_mode="HTML", supports_streaming="true", timeout=300,
+                             **extra)
 
     def document(self, chat, path, caption=""):
         with open(path, "rb") as f:
@@ -274,6 +281,12 @@ def probe_size(path):
     return s["width"], s["height"]
 
 
+def probe_duration(path):
+    out = run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of",
+               "default=nw=1:nk=1", str(path)])
+    return float(out.strip())
+
+
 def ass_time(t):
     cs = int(round(t * 100))
     h, cs = divmod(cs, 360000)
@@ -364,6 +377,8 @@ def make_vertical(src, out, layout="blur", facecam=None, captions=True):
             write_ass(words, ass, cap_y)
             vf += f";[v0]ass={ass.as_posix()}[v1]"
             final = "[v1]"
+    vf += f";{final}setsar=1[vout]"
+    final = "[vout]"
     base = ["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-filter_complex", vf,
             "-map", final, "-map", "0:a?", "-af", "loudnorm=I=-14:TP=-1.5:LRA=11",
             "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
