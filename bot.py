@@ -320,26 +320,41 @@ def transcribe(path):
 
 
 def write_ass(words, path, y_pos):
-    lines = []
-    i = 0
-    while i < len(words):  # 1–3 ord per linje, bryter på pause
+    """1–3 ord per linje. Linjen 'popper' inn, og ordet som sies lyser gult."""
+    groups, i = [], 0
+    while i < len(words):  # bryter på pause
         group = [words[i]]
         i += 1
         while i < len(words) and len(group) < 3 and words[i][0] - group[-1][1] < 0.35:
             group.append(words[i])
             i += 1
-        start, end = group[0][0], max(group[-1][1], group[0][0] + 0.3)
-        text = " ".join(w[2] for w in group).upper().replace("{", "").replace("}", "")
-        lines.append(f"Dialogue: 0,{ass_time(start)},{ass_time(end)},Cap,,0,0,0,,"
-                     f"{{\\pos({W // 2},{y_pos})}}{text}")
+        groups.append(group)
+    clean = lambda t: t.upper().replace("{", "").replace("}", "").replace("\\", "")
+    pop = r"{\fscx70\fscy70\t(0,90,\fscx115\fscy115)\t(90,170,\fscx100\fscy100)}"
+    lines = []
+    for g, group in enumerate(groups):
+        group_end = max(group[-1][1], group[0][0] + 0.3)
+        if g + 1 < len(groups):  # hold teksten til neste linje hvis pausen er kort
+            nxt = groups[g + 1][0][0]
+            if nxt - group_end < 0.6:
+                group_end = nxt
+        for k, (start, end, _) in enumerate(group):
+            end = group[k + 1][0] if k + 1 < len(group) else group_end
+            parts = []
+            for j, w in enumerate(group):
+                word = clean(w[2])
+                parts.append(r"{\c&H0000E6FF&}" + word + r"{\c&H00FFFFFF&}" if j == k else word)
+            anim = pop if k == 0 else ""
+            lines.append(f"Dialogue: 0,{ass_time(start)},{ass_time(max(end, start + 0.05))},Cap,,0,0,0,,"
+                         f"{{\\pos({W // 2},{y_pos})}}{anim}{' '.join(parts)}")
     header = (
         "[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\n"
         "WrapStyle: 0\n\n[V4+ Styles]\n"
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, "
         "BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, "
         "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        "Style: Cap,DejaVu Sans,86,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,"
-        "-1,0,0,0,100,100,0,0,1,7,2,5,40,40,0,1\n\n"
+        "Style: Cap,DejaVu Sans,92,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,"
+        "-1,0,0,0,100,100,0,0,1,8,3,5,40,40,0,1\n\n"
         "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
     )
     Path(path).write_text(header + "\n".join(lines) + "\n", encoding="utf-8")
@@ -359,10 +374,12 @@ def make_vertical(src, out, layout="blur", facecam=None, captions=True):
               f"[cam][game]vstack[v0]")
         cap_y = top_h + 160
     else:
-        fg_h = int(round(sh * W / sw / 2) * 2)
+        zoom = float(CFG.get("zoom", 1.0))  # >1 = større bilde, kutter litt på sidene
+        fg_h = int(round(sh * W * zoom / sw / 2) * 2)
+        fg_w = int(round(W * zoom / 2) * 2)
         vf = (f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},"
               f"boxblur=24:2,eq=brightness=-0.12[bg];"
-              f"[0:v]scale={W}:{fg_h}[fg];"
+              f"[0:v]scale={fg_w}:{fg_h},crop={W}:{fg_h}[fg];"
               f"[bg][fg]overlay=0:(H-h)/2[v0]")
         cap_y = min(H // 2 + fg_h // 2 + 170, H - 300)
     final = "[v0]"
@@ -428,7 +445,11 @@ def twitch_scan(tg, state, budget):
             if game:  # bare GTA-klipp fra streameren
                 got = [c for c in got if c.get("game_id") == game]
             clips += got
-        for rate, c in pick_viral(clips, ch, state, now):
+        viral = pick_viral(clips, ch, state, now)
+        top = sorted(clips, key=lambda c: -c["view_count"])[:3]
+        log(f"[{name}] {len(clips)} klipp siste {CFG['lookback_hours']} t, {len(viral)} virale. "
+            f"Mest sett: " + ", ".join(f"{c['broadcaster_name']} {c['view_count']}" for c in top))
+        for rate, c in viral:
             candidates.append((rate, name, c))
     candidates.sort(key=lambda x: -x[0])
     for rate, name, c in candidates:
@@ -494,9 +515,7 @@ def run_jobs(tg, jobs, budget):
         budget[0] -= 1
 
 
-def main():
-    state = load_state()
-    tg = Telegram(os.environ["TELEGRAM_BOT_TOKEN"])
+def cycle(tg, state):
     budget = [CFG.get("max_sends_per_run", 4)]
     jobs = handle_commands(tg, state)
     save_state(state)
@@ -505,8 +524,31 @@ def main():
         twitch_scan(tg, state, budget)
     except Exception as e:
         log("Twitch-sjekk feilet:", e)
-    speed_check(tg, state)
+    try:
+        speed_check(tg, state)
+    except Exception as e:
+        log("Speed-sjekk feilet:", e)
     save_state(state)
+
+
+def main():
+    """Kjører én runde, eller går i løkke i LOOP_MINUTES minutter med CYCLE_SECONDS mellom rundene."""
+    state = load_state()
+    tg = Telegram(os.environ["TELEGRAM_BOT_TOKEN"])
+    loop_min = float(os.environ.get("LOOP_MINUTES", "0") or 0)
+    pause = int(os.environ.get("CYCLE_SECONDS", "180") or 180)
+    stop_at = time.time() + loop_min * 60
+    n = 0
+    while True:
+        n += 1
+        log(f"--- Runde {n} ({now_utc():%H:%M} UTC) ---")
+        try:
+            cycle(tg, state)
+        except Exception as e:  # én feil skal ikke stoppe hele løkka
+            log("Runden feilet:", e)
+        if time.time() + pause >= stop_at:
+            break
+        time.sleep(pause)
     log("Ferdig.")
 
 
