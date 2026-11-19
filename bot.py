@@ -233,6 +233,40 @@ def pick_viral(clips, ch_cfg, state, now):
     return picked
 
 
+def find_moments(clips, ch_cfg, state, now):
+    """Mange klipp av samme streamer innen kort tid = noe stort skjedde.
+    Returnerer (antall klipp, beste klipp, alle klipp-id-er) for ferske øyeblikk som ikke er sendt."""
+    need = ch_cfg.get("min_clips_same_moment")
+    if not need:
+        return []
+    max_age = ch_cfg.get("moment_max_age_min", 30) * 60
+    sent = state.setdefault("moments_sent", {})
+    by_streamer = {}
+    for c in clips:
+        by_streamer.setdefault(c["broadcaster_id"], []).append(c)
+    found = []
+    for cs in by_streamer.values():
+        cs = sorted(cs, key=lambda c: c["created_at"])
+        groups, group = [], []
+        for c in cs:  # samme øyeblikk = laget innen 2 min fra første klipp i gruppen
+            if group and (parse_ts(c["created_at"]) - parse_ts(group[0]["created_at"])).total_seconds() > 120:
+                groups.append(group)
+                group = []
+            group.append(c)
+        if group:
+            groups.append(group)
+        for g in groups:
+            if len(g) < need:
+                continue
+            if (now - parse_ts(g[-1]["created_at"])).total_seconds() > max_age:
+                continue
+            if any(x["id"] in sent for x in g):
+                continue
+            best = max(g, key=lambda x: (x["view_count"], x.get("duration", 0)))
+            found.append((len(g), best, [x["id"] for x in g]))
+    return found
+
+
 def same_moment_already_sent(c, state):
     """Mange klipper samme øyeblikk. Hopp over hvis vi har sendt et klipp innen 60 s av samme VOD."""
     if not c.get("video_id") or c.get("vod_offset") is None:
@@ -248,6 +282,7 @@ def same_moment_already_sent(c, state):
 def prune(state, now):
     cutoff = now.timestamp() - 48 * 3600
     state["clips"] = {k: v for k, v in state.get("clips", {}).items() if v["t"] > cutoff}
+    state["moments_sent"] = {k: v for k, v in state.get("moments_sent", {}).items() if v > cutoff}
 
 
 # ---------------------------------------------------------------- video
@@ -442,20 +477,27 @@ def twitch_scan(tg, state, budget):
                 continue
             clips = tw.clips(since, game_id=game)
         for login, uid in tw.user_ids(ch.get("twitch_logins", [])).items():
-            got = tw.clips(since, pages=1, broadcaster_id=uid)
+            got = tw.clips(since, pages=3, broadcaster_id=uid)
             if game:  # bare GTA-klipp fra streameren
                 got = [c for c in got if c.get("game_id") == game]
             clips += got
         viral = pick_viral(clips, ch, state, now)
+        moments = find_moments(clips, ch, state, now)
         top = sorted(clips, key=lambda c: -c["view_count"])[:3]
-        log(f"[{name}] {len(clips)} klipp siste {CFG['lookback_hours']} t, {len(viral)} virale. "
-            f"Mest sett: " + ", ".join(f"{c['broadcaster_name']} {c['view_count']}" for c in top))
+        log(f"[{name}] {len(clips)} klipp siste {CFG['lookback_hours']} t, {len(moments)} øyeblikk, "
+            f"{len(viral)} virale. Mest sett: "
+            + ", ".join(f"{c['broadcaster_name']} {c['view_count']}" for c in top))
+        for count, c, ids in moments:
+            candidates.append((10000 + count, name, c, f"🔥 {count} klipp av samme øyeblikk", ids))
         for rate, c in viral:
-            candidates.append((rate, name, c))
+            candidates.append((rate, name, c, f"📈 +{rate:,.0f} visninger/min".replace(",", " "), [c["id"]]))
     candidates.sort(key=lambda x: -x[0])
-    for rate, name, c in candidates:
+    done = set()
+    for score, name, c, why, ids in candidates:
         if budget[0] <= 0:
             break
+        if c["id"] in done:
+            continue
         chat = chat_for(name, state)
         if not chat:
             log(f"Ingen Telegram-gruppe for {name} ennå – skriv /start i gruppen")
@@ -463,10 +505,10 @@ def twitch_scan(tg, state, budget):
         if same_moment_already_sent(c, state):
             state["clips"][c["id"]]["sent"] = True
             continue
-        cap = (f"🔥 <b>{html.escape(c['broadcaster_name'])}</b>\n"
+        cap = (f"<b>{html.escape(c['broadcaster_name'])}</b> · {why}\n"
                f"{html.escape(c['title'])}\n"
-               f"👁 {c['view_count']:,} visninger · +{rate:,.0f}/min\n"
-               f"{c['url']}").replace(",", " ")
+               f"👁 {c['view_count']} visninger\n"
+               f"{c['url']}")
         try:
             ok = produce_and_send(tg, chat, c["url"], cap, CFG["channels"][name])
         except Exception as e:
@@ -474,6 +516,10 @@ def twitch_scan(tg, state, budget):
             tg.text(chat, f"{cap}\n\n(Klarte ikke å lage utkast, her er lenken.)")
             ok = True
         state["clips"][c["id"]]["sent"] = ok
+        if ok:
+            for i in ids:
+                state.setdefault("moments_sent", {})[i] = now.timestamp()
+        done.add(c["id"])
         budget[0] -= 1
         save_state(state)
     prune(state, now)

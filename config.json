@@ -15,7 +15,8 @@
       ],
       "min_views": 300,
       "min_views_per_min": 25,
-      "layout": "blur"
+      "layout": "blur",
+      "min_clips_same_moment": 4
     },
     "gta": {
       "title_keywords": [
@@ -29,19 +30,20 @@
       "min_views": 500,
       "min_views_per_min": 30,
       "layout": "blur",
-      "zoom": 1.0
+      "zoom": 1.0,
+      "min_clips_same_moment": 3
     },
     "speed": {
       "title_keywords": [
         "speed"
       ],
-      "youtube_live_url": "https://www.youtube.com/@IShowSpeed/live",
       "layout": "blur",
       "twitch_logins": [
         "ishowspeed"
       ],
       "min_views": 300,
-      "min_views_per_min": 25
+      "min_views_per_min": 25,
+      "min_clips_same_moment": 4
     }
   }
 }
