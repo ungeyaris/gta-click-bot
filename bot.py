@@ -360,7 +360,7 @@ def write_ass(words, path, y_pos):
     Path(path).write_text(header + "\n".join(lines) + "\n", encoding="utf-8")
 
 
-def make_vertical(src, out, layout="blur", facecam=None, captions=True):
+def make_vertical(src, out, layout="blur", facecam=None, captions=True, zoom=None):
     """9:16-utkast: uskarp bakgrunn eller facecam øverst, undertekster og lyd til ca. -14 LUFS."""
     work = Path(out).parent
     sw, sh = probe_size(src)
@@ -374,7 +374,7 @@ def make_vertical(src, out, layout="blur", facecam=None, captions=True):
               f"[cam][game]vstack[v0]")
         cap_y = top_h + 160
     else:
-        zoom = float(CFG.get("zoom", 1.0))  # >1 = større bilde, kutter litt på sidene
+        zoom = float(zoom if zoom is not None else CFG.get("zoom", 1.0))  # >1 = større, kutter sidene
         fg_h = int(round(sh * W * zoom / sw / 2) * 2)
         fg_w = int(round(W * zoom / 2) * 2)
         vf = (f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},"
@@ -413,7 +413,8 @@ def produce_and_send(tg, chat, url, caption, layout, section=None):
         out = Path(d) / "utkast.mp4"
         ch_layout = layout.get("layout", "blur") if isinstance(layout, dict) else layout
         facecam = layout.get("facecam") if isinstance(layout, dict) else None
-        make_vertical(raw, out, ch_layout, facecam)
+        zoom = layout.get("zoom") if isinstance(layout, dict) else None
+        make_vertical(raw, out, ch_layout, facecam, zoom=zoom)
         res = tg.video(chat, out, caption)
         if not res.get("ok"):
             return False
