@@ -1,0 +1,46 @@
+{
+  "game_name": "Grand Theft Auto VI",
+  "lookback_hours": 6,
+  "max_sends_per_run": 4,
+  "send_raw_clip": true,
+  "whisper_model": "small",
+  "zoom": 1.4,
+  "channels": {
+    "kai": {
+      "title_keywords": [
+        "kai"
+      ],
+      "twitch_logins": [
+        "kaicenat"
+      ],
+      "min_views": 300,
+      "min_views_per_min": 25,
+      "layout": "blur"
+    },
+    "gta": {
+      "title_keywords": [
+        "gta"
+      ],
+      "whole_category": true,
+      "exclude_logins": [
+        "kaicenat",
+        "ishowspeed"
+      ],
+      "min_views": 500,
+      "min_views_per_min": 30,
+      "layout": "blur"
+    },
+    "speed": {
+      "title_keywords": [
+        "speed"
+      ],
+      "youtube_live_url": "https://www.youtube.com/@IShowSpeed/live",
+      "layout": "blur",
+      "twitch_logins": [
+        "ishowspeed"
+      ],
+      "min_views": 300,
+      "min_views_per_min": 25
+    }
+  }
+}
